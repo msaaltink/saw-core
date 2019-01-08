@@ -73,6 +73,7 @@ import qualified Data.Map as Map
 import Data.Set (Set)
 import qualified Data.Set as Set
 import Control.Monad.Trans.Writer.Strict
+import GHC.Stack ( HasCallStack )
 
 
 import Verifier.SAW.Cache
@@ -462,7 +463,7 @@ listRules ss = [ r | Left r <- Net.content ss ]
 ----------------------------------------------------------------------
 -- Destructors for terms
 
-asBetaRedex :: (Monad m) => R.Recognizer m Term (String, Term, Term, Term)
+asBetaRedex :: (Monad m, HasCallStack) => R.Recognizer m Term (String, Term, Term, Term)
 asBetaRedex t =
     do (f, arg) <- R.asApp t
        (s, ty, body) <- R.asLambda f
@@ -497,7 +498,7 @@ asIotaRedex t =
 
 -- | Do a single reduction step (beta, record or tuple selector) at top
 -- level, if possible.
-reduceSharedTerm :: SharedContext -> Term -> Maybe (IO Term)
+reduceSharedTerm :: HasCallStack => SharedContext -> Term -> Maybe (IO Term)
 reduceSharedTerm sc (asBetaRedex -> Just (_, _, body, arg)) = Just (instantiateVar sc 0 arg body)
 reduceSharedTerm _ (asPairRedex -> Just t) = Just (return t)
 reduceSharedTerm _ (asRecordRedex -> Just (m, i)) = fmap return (Map.lookup i m)
@@ -506,7 +507,7 @@ reduceSharedTerm sc (asIotaRedex -> Just (d, params, p_ret, cs_fs, c, args)) =
 reduceSharedTerm _ _ = Nothing
 
 -- | Rewriter for shared terms
-rewriteSharedTerm :: SharedContext -> Simpset -> Term -> IO Term
+rewriteSharedTerm :: HasCallStack => SharedContext -> Simpset -> Term -> IO Term
 rewriteSharedTerm sc ss t0 =
     do cache <- newCache
        let ?cache = cache in rewriteAll t0

@@ -53,6 +53,7 @@ import qualified Data.Map as Map
 import Data.Traversable (Traversable(..))
 #endif
 import qualified Data.Vector as V
+import GHC.Stack ( HasCallStack )
 import Prelude hiding (mapM, maximum)
 
 import Verifier.SAW.Conversion (natConversions)
@@ -490,11 +491,11 @@ ensureSort tp = throwTCError $ NotSort tp
 
 -- | Reduce a type to WHNF (using 'scWhnf'), also adding in some conversions for
 -- operations on Nat literals that are useful in type-checking
-typeCheckWHNF :: Term -> TCM Term
+typeCheckWHNF :: HasCallStack => Term -> TCM Term
 typeCheckWHNF = liftTCM scTypeCheckWHNF
 
 -- | The 'IO' version of 'typeCheckWHNF'
-scTypeCheckWHNF :: SharedContext -> Term -> IO Term
+scTypeCheckWHNF :: HasCallStack => SharedContext -> Term -> IO Term
 scTypeCheckWHNF sc t =
   do t' <- rewriteSharedTerm sc (addConvs natConversions emptySimpset) t
      scWhnf sc t'

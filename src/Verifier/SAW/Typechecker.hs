@@ -36,6 +36,7 @@ import Control.Applicative
 import Control.Monad.State
 import Data.List (findIndex)
 import qualified Data.Vector as V
+import GHC.Stack ( HasCallStack )
 import Text.PrettyPrint.ANSI.Leijen hiding ((<$>))
 
 import Verifier.SAW.Utils (internalError)
@@ -151,7 +152,7 @@ instance TypeInfer Un.Term where
        return res
 
 -- | Main workhorse function for type inference on untyped terms
-typeInferCompleteTerm :: Un.Term -> TCM TypedTerm
+typeInferCompleteTerm :: HasCallStack => Un.Term -> TCM TypedTerm
 
 -- Names
 typeInferCompleteTerm (matchAppliedName -> Just (n, args)) =

@@ -69,6 +69,7 @@ import Control.Lens
 import Control.Monad
 import Data.Map (Map)
 import qualified Data.Map as Map
+import GHC.Stack ( HasCallStack )
 import Numeric.Natural (Natural)
 
 import Verifier.SAW.Term.Functor
@@ -123,7 +124,7 @@ isGlobalDef i t = do
   o <- asGlobalDef t
   if i == o then return () else fail ("not " ++ show i)
 
-asApp :: (Monad f) => Recognizer f Term (Term, Term)
+asApp :: (Monad f, HasCallStack) => Recognizer f Term (Term, Term)
 asApp (unwrapTermF -> App x y) = return (x, y)
 asApp _ = fail "not app"
 
