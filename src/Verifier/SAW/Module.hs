@@ -75,6 +75,13 @@ module Verifier.SAW.Module
   , allModuleCtors
     -- * Pretty-printing
   , ppModule
+    -- * Frozen modules
+  , FrozenModule (..)
+  , freezeModule
+  , unfreezeModule
+  , FrozenModuleMap
+  , freezeModuleMap
+  , unfreezeModuleMap
   ) where
 
 #if !MIN_VERSION_base(4,8,0)
@@ -88,6 +95,7 @@ import Data.HashMap.Strict (HashMap)
 import qualified Data.HashMap.Strict as HMap
 import GHC.Generics (Generic)
 import Text.PrettyPrint.ANSI.Leijen (Doc)
+import Control.Monad.State.Strict as State
 import qualified Language.Haskell.TH.Syntax as TH
 import Instances.TH.Lift ()
 
@@ -172,7 +180,7 @@ data Def =
   , defType :: Term
   , defBody :: Maybe Term
   }
-  deriving (Eq, Show, Generic, TH.Lift)
+  deriving (Eq, Show, Generic)
 
 instance Hashable Def -- automatically derived
 
@@ -222,8 +230,6 @@ data Ctor =
     -- 'DataType' for this constructor.
   }
 
-deriving instance TH.Lift Ctor
-
 -- | Return the number of parameters of a constructor
 ctorNumParams :: Ctor -> Int
 ctorNumParams (Ctor { ctorArgStruct = CtorArgStruct {..}}) =
@@ -270,7 +276,6 @@ data DataType =
     -- where the @pi@ are the 'dtParams' and the @ii@ are the 'dtIndices'. Note
     -- that this type should always be top-level, i.e., have no free variables.
   }
-  deriving TH.Lift
 
 -- | Return the number of parameters of a datatype
 dtNumParams :: DataType -> Int
@@ -295,14 +300,12 @@ instance Show DataType where
 -- | Declarations that can occur in a module
 data ModuleDecl = TypeDecl DataType
                 | DefDecl Def
-                deriving TH.Lift
 
 -- | The different sorts of things that a 'String' name can be resolved to
 data ResolvedName
   = ResolvedCtor Ctor
   | ResolvedDataType DataType
   | ResolvedDef Def
-  deriving TH.Lift
 
 -- | Get the 'Ident' for a 'ResolvedName'
 resolvedNameIdent :: ResolvedName -> Ident
@@ -321,7 +324,6 @@ data Module = Module {
         , moduleResolveMap :: !(Map String ResolvedName)
         , moduleRDecls   :: [ModuleDecl] -- ^ All declarations in reverse order they were added.
         }
-  deriving TH.Lift
 
 -- | Get the names of all modules imported by the given one
 moduleImportNames :: Module -> [ModuleName]
@@ -543,3 +545,144 @@ ppModule opts m =
       (map (\c -> (ctorName c, ctorType c)) dtCtors)
     toDecl (DefDecl (Def {..})) =
       PPDefDecl defIdent defType defBody
+
+-- Frozen Modules --------------------------------------------------------------
+
+data FrozenCtor =
+  forall d params ixs.
+  FrozenCtor
+  { frozenCtorName :: !Ident
+  , frozenCtorArgStruct :: CtorArgStruct d params ixs
+    -- ^ FIXME: a CtorArgStruct contains 'Term's, which should not be frozen
+    -- because it causes exponential explosion; the right way to fix this is to
+    -- have CtorArgStruct (and everything it uses and that uses it) be indexed
+    -- by a term type @t@ that could either be 'Term' or 'FrozenTerm'
+  , frozenCtorDataTypeName :: Ident
+  , frozenCtorType :: FrozenTerm
+  , frozenCtorIotaReduction :: FrozenTerm
+  }
+
+deriving instance TH.Lift FrozenCtor
+
+freezeCtor :: Ctor -> FreezeM FrozenCtor
+freezeCtor (Ctor {..}) =
+  FrozenCtor ctorName ctorArgStruct ctorDataTypeName <$>
+  freezeTerm ctorType <*> freezeTerm ctorIotaReduction
+
+unfreezeCtor :: FrozenCtor -> UnfreezeM Ctor
+unfreezeCtor (FrozenCtor {..}) =
+  Ctor frozenCtorName frozenCtorArgStruct frozenCtorDataTypeName <$>
+  unfreezeTerm frozenCtorType <*>
+  unfreezeTerm frozenCtorIotaReduction
+
+data FrozenDataType =
+  FrozenDataType
+  { fdtName :: Ident
+  , fdtParams :: [(String,FrozenTerm)]
+  , fdtIndices :: [(String,FrozenTerm)]
+  , fdtSort :: Sort
+  , fdtCtors :: [FrozenCtor]
+  , fdtType :: FrozenTerm
+  }
+  deriving TH.Lift
+
+freezeDataType :: DataType -> FreezeM FrozenDataType
+freezeDataType (DataType {..}) =
+  FrozenDataType dtName <$>
+  mapM (\(str,t) -> freezeTerm t >>= \f -> return (str,f)) dtParams <*>
+  mapM (\(str,t) -> freezeTerm t >>= \f -> return (str,f)) dtIndices <*>
+  return dtSort <*>
+  mapM freezeCtor dtCtors <*>
+  freezeTerm dtType
+
+unfreezeDataType :: FrozenDataType -> UnfreezeM DataType
+unfreezeDataType (FrozenDataType {..}) = error "unfreezeDataType"
+
+data FrozenDef =
+  FrozenDef
+  { frozenDefIdent :: Ident
+  , frozenDefQualifier :: DefQualifier
+  , frozenDefType :: FrozenTerm
+  , frozenDefBody :: Maybe FrozenTerm
+  }
+  deriving TH.Lift
+
+
+freezeDef :: Def -> FreezeM FrozenDef
+freezeDef (Def {..}) =
+  FrozenDef defIdent defQualifier <$> freezeTerm defType <*>
+  mapM freezeTerm defBody
+
+unfreezeDef :: FrozenDef -> UnfreezeM Def
+unfreezeDef (FrozenDef {..}) = error "unfreezeDef"
+
+data FrozenResolvedName
+  = FrozenResolvedCtor FrozenCtor
+  | FrozenResolvedDataType FrozenDataType
+  | FrozenResolvedDef FrozenDef
+  deriving TH.Lift
+
+freezeResolvedName :: ResolvedName -> FreezeM FrozenResolvedName
+freezeResolvedName (ResolvedCtor ctor) =
+  FrozenResolvedCtor <$> freezeCtor ctor
+freezeResolvedName (ResolvedDataType dt) =
+  FrozenResolvedDataType <$> freezeDataType dt
+freezeResolvedName (ResolvedDef d) =
+  FrozenResolvedDef <$> freezeDef d
+
+unfreezeResolvedName :: FrozenResolvedName -> UnfreezeM ResolvedName
+unfreezeResolvedName (FrozenResolvedCtor ctor) =
+  ResolvedCtor <$> unfreezeCtor ctor
+unfreezeResolvedName (FrozenResolvedDataType dt) =
+  ResolvedDataType <$> unfreezeDataType dt
+unfreezeResolvedName (FrozenResolvedDef d) =
+  ResolvedDef <$> unfreezeDef d
+
+data FrozenModuleDecl
+  = FrozenTypeDecl FrozenDataType
+  | FrozenDefDecl FrozenDef
+  deriving TH.Lift
+
+freezeModuleDecl :: ModuleDecl -> FreezeM FrozenModuleDecl
+freezeModuleDecl = error "FIXME: freezeModuleDecl"
+
+unfreezeModuleDecl :: FrozenModuleDecl -> UnfreezeM ModuleDecl
+unfreezeModuleDecl = error "FIXME: unfreezeModuleDecl"
+
+data FrozenModule =
+  FrozenModule {
+  frozenModuleName    :: ModuleName
+  , frozenModuleImports :: [ModuleName]
+  , frozenModuleResolveMap :: !(Map String FrozenResolvedName)
+  , frozenModuleRDecls   :: [FrozenModuleDecl]
+  }
+  deriving TH.Lift
+
+freezeModule :: Module -> FreezeM FrozenModule
+freezeModule (Module {..}) =
+  FrozenModule moduleName (Map.keys moduleImports) <$>
+  mapM freezeResolvedName moduleResolveMap <*>
+  mapM freezeModuleDecl moduleRDecls
+
+unfreezeImport :: ModuleMap -> ModuleName -> (ModuleName, Module)
+unfreezeImport modmap mnm =
+  case HMap.lookup mnm modmap of
+    Just m -> (mnm, m)
+    Nothing -> error ("unfreezeImport: module not found: " ++ show mnm)
+
+unfreezeModule :: ModuleMap -> FrozenModule -> UnfreezeM Module
+unfreezeModule modmap (FrozenModule {..}) =
+  Module frozenModuleName <$>
+  (return $ Map.fromList $
+   map (unfreezeImport modmap) frozenModuleImports) <*>
+  mapM unfreezeResolvedName frozenModuleResolveMap <*>
+  mapM unfreezeModuleDecl frozenModuleRDecls
+
+type FrozenModuleMap = [(ModuleName, FrozenModule)]
+
+freezeModuleMap :: ModuleMap -> FreezeM FrozenModuleMap
+freezeModuleMap m = HMap.toList <$> mapM freezeModule m
+
+unfreezeModuleMap :: FrozenModuleMap -> UnfreezeM ModuleMap
+unfreezeModuleMap m =
+  mfix (\modmap -> mapM (unfreezeModule modmap) $ HMap.fromList m)

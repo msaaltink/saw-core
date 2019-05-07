@@ -248,6 +248,7 @@ import Verifier.SAW.Term.CtxTerm
 --import Verifier.SAW.Term.Pretty
 import Verifier.SAW.TypedAST
 import Verifier.SAW.Unique
+import Verifier.SAW.Module (FrozenModuleMap, freezeModuleMap, unfreezeModuleMap)
 
 #if !MIN_VERSION_base(4,8,0)
 countTrailingZeros :: (FiniteBits b) => b -> Int
@@ -269,7 +270,7 @@ data TermFMap a
   = TermFMap
   { appMapTFM :: !(IntMap (IntMap a))
   , hashMapTFM :: !(HashMap (TermF Term) a)
-  }
+  } deriving Functor
 
 emptyTFM :: TermFMap a
 emptyTFM = TermFMap IntMap.empty HMap.empty
@@ -368,27 +369,33 @@ mkOverrideSharedContext sc f = sc { scTermOverride = Just f }
 
 -- | A "frozen" shared context, that can be serialized and deserialized
 data FrozenSharedContext = FrozenSharedContext
-  { frozenModuleMap      :: [(ModuleName, Module)]
+  { frozenModuleMap      :: FrozenModuleMap
   , frozenNextVarIndex   :: VarIndex
-  , frozenTermCache      :: FrozenTermFMap Term
+  , frozenTermCache      :: FrozenTermFMap FrozenTerm
   }
   deriving TH.Lift
 
 freezeSharedContext :: SharedContext -> IO FrozenSharedContext
 freezeSharedContext sc =
+  error "FIXME: freezeSharedContext"
+{-
   case scTermOverride sc of
     Just _ -> error "freezeSharedContext: non-empty override!"
     Nothing ->
-      FrozenSharedContext <$> (HMap.toList <$> readIORef (scModuleMap sc)) <*>
+      FrozenSharedContext <$> (freezeModuleMap <$> readIORef (scModuleMap sc)) <*>
       readMVar (scNextVarIndex sc) <*>
-      (freezeTermFMap <$> readMVar (scTermCache sc))
+      (freezeTermFMap <$> fmap freezeTerm <$> readMVar (scTermCache sc))
+-}
 
 unfreezeSharedContext :: FrozenSharedContext -> IO SharedContext
 unfreezeSharedContext sc =
-  SharedContext <$> newIORef (HMap.fromList (frozenModuleMap sc)) <*>
+  error "FIXME: unfreezeSharedContext"
+{-
+  SharedContext <$> newIORef (unfreezeModuleMap (frozenModuleMap sc)) <*>
   newMVar (frozenNextVarIndex sc) <*>
-  newMVar (unfreezeTermFMap (frozenTermCache sc)) <*>
+  (mapM unfreezeTerm (unfreezeTermFMap (frozenTermCache sc)) >>= newMVar) <*>
   return Nothing
+-}
 
 emptyFrozenSharedContext :: FrozenSharedContext
 emptyFrozenSharedContext =

@@ -20,9 +20,11 @@ import Verifier.SAW.ParserUtils
 import Verifier.SAW.Prelude.Constants
 import Verifier.SAW.SharedTerm
 
+{-
 $(defineModuleFromFileWithSCs
   emptyFrozenSharedContext
   "preludeSC" "preludeModule" "prelude/Prelude.sawcore")
+-}
 
 scEq :: SharedContext -> Term -> Term -> IO Term
 scEq sc x y = do

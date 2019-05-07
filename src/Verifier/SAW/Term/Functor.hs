@@ -49,6 +49,9 @@ module Verifier.SAW.Term.Functor
   , BitSet, emptyBitSet, inBitSet, unionBitSets, intersectBitSets
   , decrBitSet, completeBitSet, singletonBitSet
   , looseVars, smallestFreeVar
+    -- * Frozen terms
+  , FrozenTerm(..), freezeTerm, unfreezeTerm
+  , FreezeState(..), FreezeM, UnfreezeState(..), UnfreezeM
   ) where
 
 import Control.Exception (assert)
@@ -70,6 +73,7 @@ import qualified Data.Vector as V
 import Data.Word
 import GHC.Generics (Generic)
 import GHC.Exts (IsString(..))
+import Control.Monad.State.Strict as State
 import qualified Language.Haskell.TH.Syntax as TH
 import Instances.TH.Lift ()
 
@@ -404,6 +408,11 @@ data Term
   | Unshared !(TermF Term)
   deriving (Show, Typeable, TH.Lift)
 
+-- FIXME: we should not derive a TH.Lift instance for Term because we lose the
+-- sharing in stAppTermF, leading to exponential size. The only place we
+-- currently use this TH.Lift instance is to lift a CtorArgStruct, which would
+-- be annoying to replace...
+
 instance Hashable Term where
   hashWithSalt salt STApp{ stAppIndex = i } = salt `combine` 0x00000000 `hashWithSalt` hash i
   hashWithSalt salt (Unshared t) = salt `combine` 0x55555555 `hashWithSalt` hash t
@@ -465,6 +474,35 @@ termToPat t =
 unwrapTermF :: Term -> TermF Term
 unwrapTermF STApp{stAppTermF = tf} = tf
 unwrapTermF (Unshared tf) = tf
+
+
+-- Freezing Terms to TH --------------------------------------------------------
+
+data FrozenTerm
+  = FrozenSTApp TermIndex
+  | FrozenUnshared !(TermF FrozenTerm)
+  deriving (Show, Typeable, TH.Lift)
+
+data FreezeState = FreezeState
+type FreezeM = State.State FreezeState
+
+freezeTerm :: Term -> FreezeM FrozenTerm
+freezeTerm = error "FIXME: freezeTerm"
+{-
+freezeTerm (STApp ix _ _) = FrozenSTApp ix
+freezeTerm (Unshared tf) = FrozenUnshared $ fmap freezeTerm tf
+-}
+
+data UnfreezeState = UnfreezeState
+type UnfreezeM = State.State UnfreezeState
+
+unfreezeTerm :: FrozenTerm -> UnfreezeM Term
+unfreezeTerm = error "FIXME: unfreezeTerm"
+{-
+unfreezeTerm (FrozenSTApp ix) = unfreezeIndex ix
+unfreezeTerm (FrozenUnshared tf) =
+  Unshared <$> mapM unfreezeTerm tf
+-}
 
 
 -- Free de Bruijn Variables ----------------------------------------------------
