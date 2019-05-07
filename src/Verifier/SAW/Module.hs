@@ -596,7 +596,7 @@ freezeDataType (DataType {..}) =
   freezeTerm dtType
 
 unfreezeDataType :: FrozenDataType -> UnfreezeM DataType
-unfreezeDataType (FrozenDataType {..}) = error "unfreezeDataType"
+unfreezeDataType (FrozenDataType {..}) = error "FIXME freeze: unfreezeDataType"
 
 data FrozenDef =
   FrozenDef
@@ -614,7 +614,7 @@ freezeDef (Def {..}) =
   mapM freezeTerm defBody
 
 unfreezeDef :: FrozenDef -> UnfreezeM Def
-unfreezeDef (FrozenDef {..}) = error "unfreezeDef"
+unfreezeDef (FrozenDef {..}) = error "FIXME freeze: unfreezeDef"
 
 data FrozenResolvedName
   = FrozenResolvedCtor FrozenCtor
@@ -644,10 +644,10 @@ data FrozenModuleDecl
   deriving TH.Lift
 
 freezeModuleDecl :: ModuleDecl -> FreezeM FrozenModuleDecl
-freezeModuleDecl = error "FIXME: freezeModuleDecl"
+freezeModuleDecl = error "FIXME freeze: freezeModuleDecl"
 
 unfreezeModuleDecl :: FrozenModuleDecl -> UnfreezeM ModuleDecl
-unfreezeModuleDecl = error "FIXME: unfreezeModuleDecl"
+unfreezeModuleDecl = error "FIXME freeze: unfreezeModuleDecl"
 
 data FrozenModule =
   FrozenModule {

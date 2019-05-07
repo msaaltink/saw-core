@@ -377,7 +377,7 @@ data FrozenSharedContext = FrozenSharedContext
 
 freezeSharedContext :: SharedContext -> IO FrozenSharedContext
 freezeSharedContext sc =
-  error "FIXME: freezeSharedContext"
+  error "FIXME freeze: freezeSharedContext"
 {-
   case scTermOverride sc of
     Just _ -> error "freezeSharedContext: non-empty override!"
@@ -389,7 +389,7 @@ freezeSharedContext sc =
 
 unfreezeSharedContext :: FrozenSharedContext -> IO SharedContext
 unfreezeSharedContext sc =
-  error "FIXME: unfreezeSharedContext"
+  error "FIXME freeze: unfreezeSharedContext"
 {-
   SharedContext <$> newIORef (unfreezeModuleMap (frozenModuleMap sc)) <*>
   newMVar (frozenNextVarIndex sc) <*>

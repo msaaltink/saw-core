@@ -487,7 +487,7 @@ data FreezeState = FreezeState
 type FreezeM = State.State FreezeState
 
 freezeTerm :: Term -> FreezeM FrozenTerm
-freezeTerm = error "FIXME: freezeTerm"
+freezeTerm = error "FIXME freeze: freezeTerm"
 {-
 freezeTerm (STApp ix _ _) = FrozenSTApp ix
 freezeTerm (Unshared tf) = FrozenUnshared $ fmap freezeTerm tf
@@ -497,7 +497,7 @@ data UnfreezeState = UnfreezeState
 type UnfreezeM = State.State UnfreezeState
 
 unfreezeTerm :: FrozenTerm -> UnfreezeM Term
-unfreezeTerm = error "FIXME: unfreezeTerm"
+unfreezeTerm = error "FIXME freeze: unfreezeTerm"
 {-
 unfreezeTerm (FrozenSTApp ix) = unfreezeIndex ix
 unfreezeTerm (FrozenUnshared tf) =
