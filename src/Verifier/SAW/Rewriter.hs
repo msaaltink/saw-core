@@ -627,7 +627,7 @@ rewriteSharedTermTypeSafe sc ss t0 =
 rewritingSharedContext :: SharedContext -> Simpset -> SharedContext
 rewritingSharedContext sc ss = sc'
   where
-    sc' = sc { scTermF = rewriteTop }
+    sc' = mkOverrideSharedContext sc rewriteTop
 
     rewriteTop :: TermF Term -> IO Term
     rewriteTop tf =

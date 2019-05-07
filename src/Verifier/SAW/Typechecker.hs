@@ -403,9 +403,12 @@ processDecls (Un.DataDecl (PosPair p nm) param_ctx dt_tp c_decls : rest) =
         case ctxBindingsOfTerms dtIndices of
           ExistsTp ix_ctx ->
             forM typed_ctors $ \(c, tp) ->
-            case mkCtorArgStruct dtName p_ctx ix_ctx tp of
+            let c_id = mkIdent mnm c in
+            (mkCtorArgStruct (DataIdent dtName)
+             c_id p_ctx ix_ctx tp) >>= \maybe_struct ->
+            case maybe_struct of
               Just arg_struct ->
-                liftTCM scBuildCtor dtName (mkIdent mnm c)
+                liftTCM scBuildCtor dtName c_id
                 (map (mkIdent mnm . fst) typed_ctors)
                 arg_struct
               Nothing -> err ("Malformed type form constructor: " ++ c)

@@ -8,6 +8,8 @@
 {-# LANGUAGE ExistentialQuantification #-}
 {-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE LambdaCase #-}
+{-# LANGUAGE DeriveLift #-}
+{-# LANGUAGE StandaloneDeriving #-}
 
 {- |
 Module      : Verifier.SAW.Module
@@ -86,6 +88,8 @@ import Data.HashMap.Strict (HashMap)
 import qualified Data.HashMap.Strict as HMap
 import GHC.Generics (Generic)
 import Text.PrettyPrint.ANSI.Leijen (Doc)
+import qualified Language.Haskell.TH.Syntax as TH
+import Instances.TH.Lift ()
 
 import Prelude hiding (all, foldr, sum)
 
@@ -155,7 +159,7 @@ data DefQualifier
   = NoQualifier
   | PrimQualifier
   | AxiomQualifier
- deriving (Eq, Show, Read, Generic)
+ deriving (Eq, Show, Read, Generic, TH.Lift)
 
 instance Hashable DefQualifier -- automatically derived
 
@@ -168,7 +172,7 @@ data Def =
   , defType :: Term
   , defBody :: Maybe Term
   }
-  deriving (Eq, Show, Generic)
+  deriving (Eq, Show, Generic, TH.Lift)
 
 instance Hashable Def -- automatically derived
 
@@ -194,7 +198,7 @@ data Ctor =
     -- where the @pi@ are the 'ctorParams', the @argi@ are the types specified
     -- by the 'ctorArgs', and the @ixi@ are the 'ctorDataTypeIndices'. Note that
     -- this type should always be top-level, i.e., have no free variables.
-  , ctorElimTypeFun :: [Term] -> Term -> IO Term
+  -- , ctorElimTypeFun :: [Term] -> Term -> IO Term
     -- ^ Cached function for generating the type of an eliminator for this
     -- constructor by passing it a list of parameters and a @p_ret@ function,
     -- also known as the "motive function", which itself must have type
@@ -218,6 +222,8 @@ data Ctor =
     -- 'DataType' for this constructor.
   }
 
+deriving instance TH.Lift Ctor
+
 -- | Return the number of parameters of a constructor
 ctorNumParams :: Ctor -> Int
 ctorNumParams (Ctor { ctorArgStruct = CtorArgStruct {..}}) =
@@ -227,7 +233,6 @@ ctorNumParams (Ctor { ctorArgStruct = CtorArgStruct {..}}) =
 ctorNumArgs :: Ctor -> Int
 ctorNumArgs (Ctor { ctorArgStruct = CtorArgStruct {..}}) =
   bindingsLength ctorArgs
-
 
 lift2 :: (a -> b) -> (b -> b -> c) -> a -> a -> c
 lift2 f h x y = h (f x) (f y)
@@ -265,6 +270,7 @@ data DataType =
     -- where the @pi@ are the 'dtParams' and the @ii@ are the 'dtIndices'. Note
     -- that this type should always be top-level, i.e., have no free variables.
   }
+  deriving TH.Lift
 
 -- | Return the number of parameters of a datatype
 dtNumParams :: DataType -> Int
@@ -289,12 +295,14 @@ instance Show DataType where
 -- | Declarations that can occur in a module
 data ModuleDecl = TypeDecl DataType
                 | DefDecl Def
+                deriving TH.Lift
 
 -- | The different sorts of things that a 'String' name can be resolved to
 data ResolvedName
   = ResolvedCtor Ctor
   | ResolvedDataType DataType
   | ResolvedDef Def
+  deriving TH.Lift
 
 -- | Get the 'Ident' for a 'ResolvedName'
 resolvedNameIdent :: ResolvedName -> Ident
@@ -313,6 +321,7 @@ data Module = Module {
         , moduleResolveMap :: !(Map String ResolvedName)
         , moduleRDecls   :: [ModuleDecl] -- ^ All declarations in reverse order they were added.
         }
+  deriving TH.Lift
 
 -- | Get the names of all modules imported by the given one
 moduleImportNames :: Module -> [ModuleName]

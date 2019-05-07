@@ -9,6 +9,7 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE LambdaCase #-}
+{-# LANGUAGE DeriveLift #-}
 
 {- |
 Module      : Verifier.SAW.SharedTerm
@@ -44,7 +45,11 @@ module Verifier.SAW.SharedTerm
     -- * SharedContext interface for building shared terms
   , SharedContext
   , mkSharedContext
+  , mkOverrideSharedContext
   , scGetModuleMap
+  , FrozenSharedContext
+  , freezeSharedContext
+  , unfreezeSharedContext
     -- ** Low-level generic term constructors
   , scTermF
   , scFlatTermF
@@ -231,6 +236,7 @@ import qualified Data.Set as Set
 import qualified Data.Vector as V
 import Numeric.Natural (Natural)
 import Prelude hiding (mapM, maximum)
+import qualified Language.Haskell.TH.Syntax as TH
 
 import Verifier.SAW.Cache
 import Verifier.SAW.Change
@@ -283,14 +289,112 @@ insertTFM tf x tfm =
       in tfm { appMapTFM = IntMap.alter f i (appMapTFM tfm) }
     _ -> tfm { hashMapTFM = HMap.insert tf x (hashMapTFM tfm) }
 
+
+-- | A "frozen" TermFMap is one that we can serialize to/from template haskell
+-- (note that 'HashMap' does not have a 'TH.Lift' instance)
+data FrozenTermFMap a =
+  FrozenTermFMap { frozenAppMap :: IntMap (IntMap a),
+                   frozenHashMap :: [(TermF Term, a)] }
+  deriving TH.Lift
+
+freezeTermFMap :: TermFMap a -> FrozenTermFMap a
+freezeTermFMap tfm =
+  FrozenTermFMap { frozenAppMap = appMapTFM tfm,
+                   frozenHashMap = HMap.toList $ hashMapTFM tfm }
+
+unfreezeTermFMap :: FrozenTermFMap a -> TermFMap a
+unfreezeTermFMap tfm =
+  TermFMap { appMapTFM = frozenAppMap tfm,
+             hashMapTFM = HMap.fromList $ frozenHashMap tfm }
+
+
 ----------------------------------------------------------------------
 -- SharedContext: a high-level interface for building Terms.
 
+-- SharedContext implementation.
+
+type AppCache = TermFMap Term
+
+type AppCacheRef = MVar AppCache
+
+emptyAppCache :: AppCache
+emptyAppCache = emptyTFM
+
+-- | Return term for application using existing term in cache if it is available.
+getTerm :: AppCacheRef -> TermF Term -> IO Term
+getTerm r a =
+  modifyMVar r $ \s -> do
+    case lookupTFM a s of
+      Just t -> return (s, t)
+      Nothing -> do
+        i <- getUniqueInt
+        let t = STApp { stAppIndex = i
+                      , stAppFreeVars = freesTermF (fmap looseVars a)
+                      , stAppTermF = a
+                      }
+        let s' = insertTFM a t s
+        seq s' $ return (s', t)
+
+
 data SharedContext = SharedContext
   { scModuleMap      :: IORef ModuleMap
-  , scTermF          :: TermF Term -> IO Term
-  , scFreshGlobalVar :: IO VarIndex
+  , scNextVarIndex   :: MVar VarIndex
+  , scTermCache      :: AppCacheRef
+  , scTermOverride   :: Maybe (TermF Term -> IO Term)
   }
+
+-- | The default instance of the SharedContext operations.
+mkSharedContext :: IO SharedContext
+mkSharedContext = do
+  vr <- newMVar 0 -- Reference for getting variables.
+  cr <- newMVar emptyAppCache
+  mod_map_ref <- newIORef HMap.empty
+  return SharedContext {
+             scModuleMap = mod_map_ref
+           , scNextVarIndex = vr
+           , scTermCache = cr
+           , scTermOverride = Nothing
+           }
+
+-- | Build a 'SharedContext' with a custom 'scTermF' function to override the
+-- default hashing behavior
+mkOverrideSharedContext :: SharedContext -> (TermF Term -> IO Term) ->
+                           SharedContext
+mkOverrideSharedContext sc f = sc { scTermOverride = Just f }
+
+-- | A "frozen" shared context, that can be serialized and deserialized
+data FrozenSharedContext = FrozenSharedContext
+  { frozenModuleMap      :: [(ModuleName, Module)]
+  , frozenNextVarIndex   :: VarIndex
+  , frozenTermCache      :: FrozenTermFMap Term
+  }
+  deriving TH.Lift
+
+freezeSharedContext :: SharedContext -> IO FrozenSharedContext
+freezeSharedContext sc =
+  case scTermOverride sc of
+    Just _ -> error "freezeSharedContext: non-empty override!"
+    Nothing ->
+      FrozenSharedContext <$> (HMap.toList <$> readIORef (scModuleMap sc)) <*>
+      readMVar (scNextVarIndex sc) <*>
+      (freezeTermFMap <$> readMVar (scTermCache sc))
+
+unfreezeSharedContext :: FrozenSharedContext -> IO SharedContext
+unfreezeSharedContext sc =
+  SharedContext <$> newIORef (HMap.fromList (frozenModuleMap sc)) <*>
+  newMVar (frozenNextVarIndex sc) <*>
+  newMVar (unfreezeTermFMap (frozenTermCache sc)) <*>
+  return Nothing
+
+scTermF :: SharedContext -> TermF Term -> IO Term
+scTermF sc =
+  case scTermOverride sc of
+    Just f -> f
+    Nothing -> getTerm (scTermCache sc)
+
+scFreshGlobalVar :: SharedContext -> IO VarIndex
+scFreshGlobalVar sc =
+  modifyMVar (scNextVarIndex sc) (\i -> return (i+1, i))
 
 scFlatTermF :: SharedContext -> FlatTermF Term -> IO Term
 scFlatTermF sc ftf = scTermF sc (FTermF ftf)
@@ -417,31 +521,6 @@ scRequireCtor sc i =
     Nothing -> fail ("Could not find constructor: " ++ show i)
 
 
--- SharedContext implementation.
-
-type AppCache = TermFMap Term
-
-type AppCacheRef = MVar AppCache
-
-emptyAppCache :: AppCache
-emptyAppCache = emptyTFM
-
--- | Return term for application using existing term in cache if it is available.
-getTerm :: AppCacheRef -> TermF Term -> IO Term
-getTerm r a =
-  modifyMVar r $ \s -> do
-    case lookupTFM a s of
-      Just t -> return (s, t)
-      Nothing -> do
-        i <- getUniqueInt
-        let t = STApp { stAppIndex = i
-                      , stAppFreeVars = freesTermF (fmap looseVars a)
-                      , stAppTermF = a
-                      }
-        let s' = insertTFM a t s
-        seq s' $ return (s', t)
-
-
 --------------------------------------------------------------------------------
 -- Recursors
 
@@ -487,7 +566,7 @@ scBuildCtor sc d c ctor_names arg_struct =
   do
     -- Step 1: build the types for the constructor and its eliminator
     tp <- scShCtxM sc $ ctxCtorType d arg_struct
-    elim_tp_fun <- scShCtxM sc $ mkCtorElimTypeFun d c arg_struct
+    -- elim_tp_fun <- scShCtxM sc $ mkCtorElimTypeFun d c arg_struct
 
     -- Step 2: build free variables for params, p_ret, the elims, and the ctor
     -- arguments
@@ -507,8 +586,8 @@ scBuildCtor sc d c ctor_names arg_struct =
     -- Finally, return the required Ctor record
     return $ Ctor { ctorName = c, ctorArgStruct = arg_struct,
                     ctorDataTypeName = d, ctorType = tp,
-                    ctorElimTypeFun =
-                      (\ps p_ret -> scShCtxM sc $ elim_tp_fun ps p_ret),
+                    -- ctorElimTypeFun =
+                    --   (\ps p_ret -> scShCtxM sc $ elim_tp_fun ps p_ret),
                     ctorIotaReduction = iota_red }
 
 -- | Given a datatype @d@, parameters @p1,..,pn@ for @d@, and a "motive"
@@ -525,8 +604,11 @@ scRecursorElimTypes :: SharedContext -> Ident -> [Term] -> Term ->
 scRecursorElimTypes sc d_id params p_ret =
   do d <- scRequireDataType sc d_id
      forM (dtCtors d) $ \ctor ->
-       do elim_type <- ctorElimTypeFun ctor params p_ret
-          return (ctorName ctor, elim_type)
+       case ctor of
+         Ctor {..} ->
+           do elim_type <-
+                scShCtxM sc (substCtorElimType ctorArgStruct params p_ret)
+              return (ctorName, elim_type)
 
 
 -- | Generate the type @(ix1::Ix1) -> .. -> (ixn::Ixn) -> d params ixs -> s@
@@ -1464,18 +1546,6 @@ scUpdBvFun :: SharedContext -> Term -> Term
 scUpdBvFun sc n a f i v = scGlobalApply sc "Prelude.updBvFun" [n, a, f, i, v]
 
 ------------------------------------------------------------
--- | The default instance of the SharedContext operations.
-mkSharedContext :: IO SharedContext
-mkSharedContext = do
-  vr <- newMVar 0 -- Reference for getting variables.
-  cr <- newMVar emptyAppCache
-  let freshGlobalVar = modifyMVar vr (\i -> return (i+1, i))
-  mod_map_ref <- newIORef HMap.empty
-  return SharedContext {
-             scModuleMap = mod_map_ref
-           , scTermF = getTerm cr
-           , scFreshGlobalVar = freshGlobalVar
-           }
 
 useChangeCache :: C m => Cache m k (Change v) -> k -> ChangeT m v -> ChangeT m v
 useChangeCache c k a = ChangeT $ useCache c k (runChangeT a)

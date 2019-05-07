@@ -63,6 +63,7 @@ import Verifier.SAW.SharedTerm
 import Verifier.SAW.TypedAST
 import Verifier.SAW.Module
 import Verifier.SAW.Position
+import Verifier.SAW.Term.CtxTerm
 
 -- | The state for a type-checking computation = a memoization table
 type TCState = Map TermIndex Term
@@ -75,9 +76,9 @@ type TCState = Map TermIndex Term
 -- * Memoizes the most general type inferred for each expression; AND
 --
 -- * Can throw 'TCError's
-type TCM a =
+type TCM =
   ReaderT (SharedContext, Maybe ModuleName, [(String,Term)])
-  (StateT TCState (ExceptT TCError IO)) a
+  (StateT TCState (ExceptT TCError IO))
 
 -- | Run a type-checking computation in a given context, starting from the empty
 -- memoization table
@@ -137,6 +138,11 @@ instance LiftTCM (IO a) where
 instance LiftTCM b => LiftTCM (a -> b) where
   type TCMLifted (a -> b) = a -> TCMLifted b
   liftTCM f a = liftTCM (\sc -> f sc a)
+
+instance MonadTerm TCM where
+  mkTermF = liftTCM scTermF
+  liftTerm = liftTCM incVars
+  substTerm = liftTCM instantiateVarList
 
 -- | Errors that can occur during type-checking
 data TCError

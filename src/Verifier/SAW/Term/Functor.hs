@@ -8,6 +8,7 @@
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE PatternGuards #-}
 {-# LANGUAGE BangPatterns #-}
+{-# LANGUAGE DeriveLift #-}
 
 {- |
 Module      : Verifier.SAW.Term.Functor
@@ -69,6 +70,8 @@ import qualified Data.Vector as V
 import Data.Word
 import GHC.Generics (Generic)
 import GHC.Exts (IsString(..))
+import qualified Language.Haskell.TH.Syntax as TH
+import Instances.TH.Lift ()
 
 import qualified Verifier.SAW.TermNet as Net
 import Verifier.SAW.Utils (internalError)
@@ -86,7 +89,7 @@ instance Hashable a => Hashable (Vector a) where
 -- Module Names ----------------------------------------------------------------
 
 newtype ModuleName = ModuleName Text -- [String]
-  deriving (Eq, Ord, Generic)
+  deriving (Eq, Ord, Generic, TH.Lift)
 
 instance Hashable ModuleName -- automatically derived
 
@@ -119,7 +122,7 @@ data Ident =
   { identModule :: ModuleName
   , identBaseName :: Text
   }
-  deriving (Eq, Ord, Generic)
+  deriving (Eq, Ord, Generic, TH.Lift)
 
 instance Hashable Ident -- automatically derived
 
@@ -173,7 +176,7 @@ isIdChar c = isAlphaNum c || (c == '_') || (c == '\'')
 data Sort
   = TypeSort Integer
   | PropSort
-  deriving (Eq, Generic)
+  deriving (Eq, Generic, TH.Lift)
 
 -- Prop is the lowest sort
 instance Ord Sort where
@@ -227,7 +230,7 @@ data ExtCns e =
   , ecName :: !String
   , ecType :: !e
   }
-  deriving (Show, Functor, Foldable, Traversable)
+  deriving (Show, Functor, Foldable, Traversable, TH.Lift)
 
 instance Eq (ExtCns e) where
   x == y = ecVarIndex x == ecVarIndex y
@@ -299,7 +302,7 @@ data FlatTermF e
 
     -- | An external constant with a name.
   | ExtCns !(ExtCns e)
-  deriving (Eq, Ord, Show, Functor, Foldable, Traversable, Generic)
+  deriving (Eq, Ord, Show, Functor, Foldable, Traversable, Generic, TH.Lift)
 
 instance Hashable e => Hashable (FlatTermF e) -- automatically derived
 
@@ -383,7 +386,7 @@ data TermF e
     | Constant String !e !e
       -- ^ An abstract constant packaged with its definition and type.
       -- The body and type should be closed terms.
-  deriving (Eq, Ord, Show, Functor, Foldable, Traversable, Generic)
+  deriving (Eq, Ord, Show, Functor, Foldable, Traversable, Generic, TH.Lift)
 
 instance Hashable e => Hashable (TermF e) -- automatically derived.
 
@@ -399,7 +402,7 @@ data Term
      , stAppTermF    :: !(TermF Term)
      }
   | Unshared !(TermF Term)
-  deriving (Show, Typeable)
+  deriving (Show, Typeable, TH.Lift)
 
 instance Hashable Term where
   hashWithSalt salt STApp{ stAppIndex = i } = salt `combine` 0x00000000 `hashWithSalt` hash i
@@ -468,7 +471,7 @@ unwrapTermF (Unshared tf) = tf
 
 -- | A @BitSet@ represents a set of natural numbers.
 -- Bit n is a 1 iff n is in the set.
-newtype BitSet = BitSet Integer deriving (Eq, Ord, Show)
+newtype BitSet = BitSet Integer deriving (Eq, Ord, Show, TH.Lift)
 
 -- | The empty 'BitSet'
 emptyBitSet :: BitSet

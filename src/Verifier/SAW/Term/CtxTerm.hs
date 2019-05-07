@@ -16,6 +16,8 @@
 {-# LANGUAGE UndecidableInstances #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE PartialTypeSignatures #-}
+{-# LANGUAGE DeriveLift #-}
+{-# LANGUAGE StandaloneDeriving #-}
 
 {- |
 Module      : Verifier.SAW.Term.CtxTerm
@@ -46,6 +48,7 @@ module Verifier.SAW.Term.CtxTerm
     Ctx(..), EmptyCtx, (::>), type (<+>)
     -- * Contexts and Bindings
   , Typ
+  , DataIdent(..)
   , CtxInvApp, CtxInv
   , Bindings(..), bindingsLength, InvBindings(..), InBindings(..)
   , invAppendBindings, invertBindings
@@ -65,7 +68,8 @@ module Verifier.SAW.Term.CtxTerm
   , CtorArg(..), CtorArgStruct(..), ctxCtorArgType, ctxCtorType
     -- * Computing with Eliminators
   , mkPRetTp
-  , ctxCtorElimType, mkCtorElimTypeFun, ctxReduceRecursor
+  , ctxCtorElimType -- , mkCtorElimTypeFun
+  , ctxReduceRecursor, substCtorElimType
     -- * Parsing and Building Constructor Types
   , mkCtorArgStruct
   ) where
@@ -75,6 +79,7 @@ import Data.Type.Equality
 import Control.Monad
 
 import Data.Parameterized.Context
+import qualified Language.Haskell.TH.Syntax as TH
 
 import Verifier.SAW.Term.Functor
 
@@ -691,8 +696,18 @@ data CtorArgStruct d params ixs =
     ctorParams :: Bindings CtxTerm EmptyCtx params,
     ctorArgs :: Bindings (CtorArg d ixs) (CtxInv params) args,
     ctorIndices :: CtxTerms (CtxInvApp (CtxInv params) args) ixs,
-    dataTypeIndices :: Bindings CtxTerm (CtxInv params) ixs
+    dataTypeIndices :: Bindings CtxTerm (CtxInv params) ixs,
+    ctorElimType :: CtxTerm (EmptyCtx <+>
+                             CtxInv params ::>
+                             (Arrows ixs (d -> Typ ()))) (Typ ())
   }
+
+deriving instance TH.Lift (Bindings CtxTerm ctx as)
+deriving instance TH.Lift (Bindings (CtorArg d ixs) ctx as)
+deriving instance TH.Lift (CtxTerm ctx as)
+deriving instance TH.Lift (CtxTerms ctx as)
+deriving instance TH.Lift (CtorArg d ixs ctx a)
+deriving instance TH.Lift (CtorArgStruct d params ixs)
 
 -- | Convert a 'CtorArg' into the type that it represents, given a context of
 -- the parameters and of the previous arguments
@@ -806,11 +821,14 @@ mkPRetTp d untyped_p_ctx untyped_ix_ctx untyped_params s =
 -- just casted to whatever type the caller specifies.
 ctxCtorElimType :: MonadTerm m =>
                    Proxy (Typ ret) -> Proxy (Typ a) -> DataIdent d -> Ident ->
-                   CtorArgStruct d params ixs ->
+                   Bindings CtxTerm EmptyCtx params ->
+                   Bindings (CtorArg d ixs) (CtxInv params) args ->
+                   CtxTerms (CtxInvApp (CtxInv params) args) ixs ->
+                   Bindings CtxTerm (CtxInv params) ixs ->
                    m (CtxTerm (CtxInv params ::>
                                (Arrows ixs (d -> Typ a))) (Typ ret))
 ctxCtorElimType ret (a_top :: Proxy (Typ a)) (d_top :: DataIdent d) c
-  (CtorArgStruct{..}) =
+  ctorParams ctorArgs ctorIndices dataTypeIndices =
   (do let params = invertBindings ctorParams
       -- NOTE: we use propSort for the type of p_ret just as arbitrary sort, but
       -- it doesn't matter because p_ret_tp is only actually used to form
@@ -899,6 +917,7 @@ ctxCtorElimType ret (a_top :: Proxy (Typ a)) (d_top :: DataIdent d) c
              (ctxPi1 "_" ih_tp $ \_ ->
                ctxLift InvNoBind (Bind "_" ih_tp NoBind) rest)
 
+{-
 -- | Build a function that substitutes parameters and a @p_ret@ return type
 -- function into the type of an eliminator, as returned by 'ctxCtorElimType',
 -- for the given constructor. We return the substitution function in the monad
@@ -918,6 +937,20 @@ mkCtorElimTypeFun d c argStruct@(CtorArgStruct {..}) =
              ctxSubstInBindings
              (CtxTermsCtxCons (invertCtxTerms paramsCtx) (mkClosedTerm p_ret))
              InvNoBind NoBind ctxElimType
+-}
+
+-- | Substitute parameters and a @p_ret@ return type function into the type of
+-- an eliminator, as returned by 'ctxCtorElimType', for the given constructor
+substCtorElimType :: MonadTerm m => CtorArgStruct d params ixs ->
+                     [Term] -> Term -> m Term
+substCtorElimType (CtorArgStruct {..}) params p_ret =
+  case ctxTermsForBindings ctorParams params of
+    Nothing -> error "ctorElimTypeFun: wrong number of parameters!"
+    Just paramsCtx ->
+      elimClosedTerm <$>
+      ctxSubstInBindings
+      (CtxTermsCtxCons (invertCtxTerms paramsCtx) (mkClosedTerm p_ret))
+      InvNoBind NoBind ctorElimType
 
 
 -- | Reduce an application of a recursor. This is known in the Coq literature as
@@ -1130,11 +1163,17 @@ mkCtorArgsIxs _ _ _ _ _ = Nothing
 -- constructor type is allowed to have the parameters but not the indices free.
 -- Test that the constructor type is an allowed type for a constructor of this
 -- datatype, and, if so, build a 'CtorArgStruct' for it.
-mkCtorArgStruct :: Ident -> Bindings CtxTerm EmptyCtx params ->
+mkCtorArgStruct :: MonadTerm m =>
+                   DataIdent d -> Ident -> Bindings CtxTerm EmptyCtx params ->
                    Bindings CtxTerm (CtxInv params) ixs -> Term ->
-                   Maybe (CtorArgStruct d params ixs)
-mkCtorArgStruct d params dt_ixs ctor_tp =
-  case mkCtorArgsIxs (DataIdent d) params dt_ixs InvNoBind (CtxTerm ctor_tp) of
-    Just (CtorArgsIxs args ctor_ixs) ->
-      Just (CtorArgStruct params args ctor_ixs dt_ixs)
-    Nothing -> Nothing
+                   m (Maybe (CtorArgStruct d params ixs))
+mkCtorArgStruct d c params dt_ixs ctor_tp =
+  case (ctxAppNilEq (invertBindings params),
+        mkCtorArgsIxs d params dt_ixs InvNoBind (CtxTerm ctor_tp)) of
+    (Refl, Just (CtorArgsIxs args ctor_ixs)) ->
+      do ctorElimType <-
+           ctxCtorElimType Proxy (Proxy :: Proxy (Typ ())) d c
+           params args ctor_ixs dt_ixs
+         return $ Just $
+           CtorArgStruct params args ctor_ixs dt_ixs ctorElimType
+    _ -> return Nothing
