@@ -22,6 +22,7 @@ module Verifier.SAW.ParserUtils
  , declareSharedModuleFns
  , defineModuleFromFileWithFns
  , tcInsertModule -- re-exported for code using defineModuleFromFileWithFns
+ , defineModuleFromFileWithSCs
  ) where
 
 #if !MIN_VERSION_base(4,8,0)
@@ -37,6 +38,7 @@ import Language.Haskell.TH
 import Language.Haskell.TH.Syntax (qAddDependentFile)
 #endif
 import System.Directory
+import qualified Language.Haskell.TH.Syntax as TH (lift)
 
 import qualified Verifier.SAW.UntypedAST as Un
 import qualified Verifier.SAW.Grammar as Un
@@ -213,3 +215,18 @@ defineModuleFromFileWithFns mod_name mod_loader path =
      addDecs [ SigD (mkName mod_loader) load_tp
              , FunD (mkName mod_loader) [ Clause [VarP sc] (NormalB load_body) [] ]
              ]
+
+defineModuleFromFileWithSCs :: FrozenSharedContext -> String -> String ->
+                               FilePath -> Q [Dec]
+defineModuleFromFileWithSCs fz_sc sc_out mod_name path =
+  runDecWriter $
+  do m <- defineModuleFromFile mod_name path
+     declareSharedModuleFns m
+     sc <- liftIO $ unfreezeSharedContext fz_sc
+     liftIO $ tcInsertModule sc m
+     let sc_nm = mkName sc_out
+     sc_tp <- lift [t| FrozenSharedContext |]
+     sc_frozen <- liftIO $ freezeSharedContext sc
+     sc_def <- lift $ TH.lift sc_frozen
+     addDecs [ SigD sc_nm sc_tp
+             , FunD sc_nm [ Clause [] (NormalB sc_def) []] ]

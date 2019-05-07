@@ -50,6 +50,7 @@ module Verifier.SAW.SharedTerm
   , FrozenSharedContext
   , freezeSharedContext
   , unfreezeSharedContext
+  , emptyFrozenSharedContext
     -- ** Low-level generic term constructors
   , scTermF
   , scFlatTermF
@@ -307,6 +308,9 @@ unfreezeTermFMap tfm =
   TermFMap { appMapTFM = frozenAppMap tfm,
              hashMapTFM = HMap.fromList $ frozenHashMap tfm }
 
+emptyFrozenTermFMap :: FrozenTermFMap a
+emptyFrozenTermFMap =
+  FrozenTermFMap { frozenAppMap = IntMap.empty, frozenHashMap = [] }
 
 ----------------------------------------------------------------------
 -- SharedContext: a high-level interface for building Terms.
@@ -385,6 +389,13 @@ unfreezeSharedContext sc =
   newMVar (frozenNextVarIndex sc) <*>
   newMVar (unfreezeTermFMap (frozenTermCache sc)) <*>
   return Nothing
+
+emptyFrozenSharedContext :: FrozenSharedContext
+emptyFrozenSharedContext =
+  FrozenSharedContext { frozenModuleMap = [],
+                        frozenNextVarIndex = 0,
+                        frozenTermCache = emptyFrozenTermFMap }
+
 
 scTermF :: SharedContext -> TermF Term -> IO Term
 scTermF sc =
