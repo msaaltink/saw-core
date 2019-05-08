@@ -216,6 +216,15 @@ defineModuleFromFileWithFns mod_name mod_loader path =
              , FunD (mkName mod_loader) [ Clause [VarP sc] (NormalB load_body) [] ]
              ]
 
+-- | @defineModuleFromFileWithSCs fz_sc sc_name mod_name file@ reads an untyped
+-- module from @file@, adds a TH declaration of the name @mod_name@ that is
+-- bound to that untyped module at runtime, and calls 'declareSharedModuleFns'
+-- to add declarations of Haskell term-building functions for each definition,
+-- constructor, and datatype declared in the module that is loaded. It then
+-- type-checks that module using the frozen context @fz_sc@, adding the
+-- constructors, datatypes, and definitions of the type-checked model to it, and
+-- defines a new frozen context named @sc_name@ that is bound to the resulting
+-- frozen context.
 defineModuleFromFileWithSCs :: FrozenSharedContext -> String -> String ->
                                FilePath -> Q [Dec]
 defineModuleFromFileWithSCs fz_sc sc_out mod_name path =
